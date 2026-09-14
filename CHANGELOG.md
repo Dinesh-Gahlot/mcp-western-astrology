@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.6.0] - 2026-09-14
+
+### Added
+
+**`divine_western_persona_chart`: Persona Chart for a chosen natal planet.** POST /western-api/v1/persona-chart on astroapi-8. Casts the full chart for the exact moment - within the first year of life - that the transiting Sun reaches the natal degree of the chosen `persona_planet`. Returns `persona_planet`, `persona_datetime`, `planetary_positions`, `house_cusps`, `aspect_table` (persona-to-persona) and `persona_natal_aspect` (persona-planet-to-natal-planet). A dedicated `WesternPersonaChartInput` extends `WesternNatalInput` with `persona_planet` (required), plus optional `node_type`, `output_include` and `graphic_layout`. Brings the Western tool count to 58.
+
+`output_include` defaults to `raw_data` (~21 KB, data only). Chart images must be requested explicitly and are large - roughly 0.5 MB per SVG. `all` is rejected by this server with an explanatory error because it returns ~4.3 MB, which will overflow an MCP client's context.
+
+### Fixed
+
+**`house_system` accepted only 9 of the API's 16 Swiss Ephemeris codes.** `VALID_HOUSE_SYSTEM_LETTERS` was derived from `HOUSE_SYSTEM_MAP.values()`, and because `A` and `E` are both Equal, the value-derived set silently omitted `A`, `D`, `V`, `X`, `S`, `T` and `N` - so those were rejected locally with a ValueError even though the API accepts them. This blocked the Persona Chart documentation's own example, which uses `house_system="A"`. The letter set is now explicit and independent of the friendly-name map, and friendly names were added for the newly reachable systems (`equal-asc`, `equal-mc`, `vehlow`, `meridian`, `axial-rotation`, `sripati`, `topocentric`, `polich-page`, `whole-sign-aries`). Verified 2026-09-14: all 16 letters return success on both astroapi-4 and astroapi-8.
+
+**Pinned `mcp[cli]` to `<2`.** The dependency was `>=1.2.0` with no upper bound. mcp 2.x renamed `FastMCP` to `MCPServer` and removed `mcp.server.fastmcp`, which this server imports at module level, so any image rebuild would have installed mcp 2.x and crashed the container on startup. Production runs 1.28.1.
+
 ## [1.5.0] - 2026-07-11
 
 ### Added
