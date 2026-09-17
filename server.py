@@ -261,16 +261,77 @@ HOUSE_SYSTEM_MAP = {
     "regiomontanus": "R",
     "campanus": "C",
     "equal": "E",
+    "equal-asc": "A",
+    "equal_asc": "A",
+    "equal-mc": "D",
+    "equal_mc": "D",
+    "vehlow": "V",
+    "vehlow-equal": "V",
     "whole-sign": "W",
     "whole_sign": "W",
     "wholesign": "W",
+    "meridian": "X",
+    "axial-rotation": "X",
     "morinus": "M",
+    "sripati": "S",
+    "topocentric": "T",
+    "polich-page": "T",
     "alcabitius": "B",
+    "whole-sign-aries": "N",
+    "whole_sign_aries": "N",
 }
-VALID_HOUSE_SYSTEM_LETTERS = set(HOUSE_SYSTEM_MAP.values())
-HOUSE_SYSTEM_FRIENDLY_NAMES = "placidus, koch, porphyry, regiomontanus, campanus, equal, whole-sign, morinus, alcabitius"
+# The full Swiss Ephemeris code set the Divine Western API accepts. Verified
+# 2026-09-14 against both astroapi-4 (/planetary-positions) and astroapi-8
+# (/persona-chart): all sixteen return success. This is deliberately NOT
+# derived from HOUSE_SYSTEM_MAP.values() — "A" and "E" are both Equal, so a
+# value-derived set silently dropped A, D, V, X, S, T and N and rejected them
+# locally even though the API supports them.
+VALID_HOUSE_SYSTEM_LETTERS = {
+    "P", "K", "O", "R", "C", "A", "E", "D",
+    "V", "W", "X", "M", "S", "T", "B", "N",
+}
+HOUSE_SYSTEM_FRIENDLY_NAMES = (
+    "placidus, koch, porphyry, regiomontanus, campanus, equal, equal-asc, equal-mc, "
+    "vehlow, whole-sign, meridian, morinus, sripati, topocentric, alcabitius, whole-sign-aries"
+)
 
 VALID_DOMINANTS_METHODS = {"TRADITIONAL", "MODERN"}
+
+# ── Persona Chart (astroapi-8 /western-api/v1/persona-chart) ──
+VALID_PERSONA_PLANETS = {
+    "sun", "moon", "mercury", "venus", "mars",
+    "jupiter", "saturn", "uranus", "neptune", "pluto",
+}
+# Case-sensitive on the wire. Verified 2026-09-14: all twelve return success,
+# lowercase is rejected with 422.
+VALID_GRAPHIC_LAYOUTS = {
+    "PLANETS_ONLY",
+    "PLANETS_DEGREES",
+    "PLANETS_DEGREES_SIGNS",
+    "INNER_V1_HOUSE_CUSPS_PLANETS",
+    "INNER_V1_HOUSE_CUSPS_PLANETS_DEGREES",
+    "INNER_V1_HOUSE_CUSPS_PLANETS_DEGREES_SIGNS",
+    "INNER_V2_HOUSE_CUSPS_PLANETS",
+    "INNER_V2_HOUSE_CUSPS_PLANETS_DEGREES",
+    "INNER_V2_HOUSE_CUSPS_PLANETS_DEGREES_SIGNS",
+    "OUTER_HOUSE_CUSPS_PLANETS",
+    "OUTER_HOUSE_CUSPS_PLANETS_DEGREES",
+    "OUTER_HOUSE_CUSPS_PLANETS_DEGREES_SIGNS",
+}
+VALID_NODE_TYPES = {"meannode", "truenode"}
+# Image tokens return hundreds of KB to >1 MB each. raw_data is the API default
+# and the only one safe to hand back through an MCP client's context window.
+VALID_OUTPUT_INCLUDE = {
+    "raw_data",
+    "persona_wheel_chart_svg",
+    "persona_wheel_chart_base64",
+    "natal_wheel_chart_svg",
+    "natal_wheel_chart_base64",
+    "persona_x_natal_wheel_chart_svg",
+    "persona_x_natal_wheel_chart_base64",
+    "all",
+}
+_IMAGE_OUTPUT_TOKENS = VALID_OUTPUT_INCLUDE - {"raw_data"}
 
 TOOL_ANNOTATIONS = {
     "readOnlyHint": True,
@@ -362,6 +423,103 @@ class WesternNatalInput(BaseModel):
     @classmethod
     def validate_house_system(cls, v: str) -> str:
         return _resolve_house_system(v)
+
+
+class WesternPersonaChartInput(WesternNatalInput):
+    """Input for the Persona Chart endpoint (astroapi-8).
+
+    Extends the standard Western natal birth data with the persona-specific
+    fields. ``year`` is inherited and IS required — the published Request Body
+    table omits it, but the API returns 422 "year: This field is required."
+    without it (verified 2026-09-14).
+    """
+
+    persona_planet: str = Field(
+        ...,
+        description=(
+            "Planet whose natal degree the transiting Sun must reach: sun, moon, mercury, "
+            "venus, mars, jupiter, saturn, uranus, neptune or pluto. Case-insensitive. "
+            "Note 'sun' reduces to a one-year-later Solar Return chart."
+        ),
+    )
+    node_type: str | None = Field(
+        default=None,
+        description="Lunar node convention for North/South Node: 'meannode' or 'truenode'. Omit for the API default.",
+    )
+    output_include: str = Field(
+        default="raw_data",
+        description=(
+            "Response size control. Comma-separated tokens. Default 'raw_data' returns the "
+            "numeric data only (~21 KB). Chart-image tokens are very large and are usually a "
+            "mistake through MCP: persona_wheel_chart_svg / natal_wheel_chart_svg / "
+            "persona_x_natal_wheel_chart_svg (~0.5 MB each) and their _base64 variants. "
+            "'all' is rejected here because it returns ~4.3 MB."
+        ),
+    )
+    graphic_layout: str | None = Field(
+        default=None,
+        description=(
+            "Wheel-image layout; affects images only, never the numeric data. UPPERCASE exactly. "
+            "One of PLANETS_ONLY, PLANETS_DEGREES, PLANETS_DEGREES_SIGNS, or the "
+            "INNER_V1_/INNER_V2_/OUTER_ HOUSE_CUSPS_PLANETS[_DEGREES][_SIGNS] variants. "
+            "Only meaningful together with an image token in output_include."
+        ),
+    )
+
+    @field_validator("persona_planet")
+    @classmethod
+    def validate_persona_planet(cls, v: str) -> str:
+        pl = (v or "").strip().lower()
+        if pl not in VALID_PERSONA_PLANETS:
+            raise ValueError(
+                f"Invalid persona_planet '{v}'. Must be one of: "
+                f"{', '.join(sorted(VALID_PERSONA_PLANETS))}"
+            )
+        return pl
+
+    @field_validator("node_type")
+    @classmethod
+    def validate_node_type(cls, v: str | None) -> str | None:
+        if v is None or not str(v).strip():
+            return None
+        nt = str(v).strip().lower()
+        if nt not in VALID_NODE_TYPES:
+            raise ValueError(f"Invalid node_type '{v}'. Must be 'meannode' or 'truenode'.")
+        return nt
+
+    @field_validator("graphic_layout")
+    @classmethod
+    def validate_graphic_layout(cls, v: str | None) -> str | None:
+        if v is None or not str(v).strip():
+            return None
+        gl = str(v).strip()
+        if gl not in VALID_GRAPHIC_LAYOUTS:
+            raise ValueError(
+                f"Invalid graphic_layout '{v}'. The API is case-sensitive; must be exactly one of: "
+                f"{', '.join(sorted(VALID_GRAPHIC_LAYOUTS))}"
+            )
+        return gl
+
+    @field_validator("output_include")
+    @classmethod
+    def validate_output_include(cls, v: str) -> str:
+        raw = (v or "").strip() or "raw_data"
+        tokens = [t.strip() for t in raw.split(",") if t.strip()]
+        if not tokens:
+            return "raw_data"
+        unknown = [t for t in tokens if t not in VALID_OUTPUT_INCLUDE]
+        if unknown:
+            raise ValueError(
+                f"Invalid output_include token(s): {', '.join(unknown)}. Allowed: "
+                f"{', '.join(sorted(VALID_OUTPUT_INCLUDE))}"
+            )
+        if "all" in tokens:
+            raise ValueError(
+                "output_include='all' returns ~4.3 MB and is refused by this MCP server because it "
+                "will overflow the client context. Request 'raw_data' for the chart data, or a single "
+                "specific image token (e.g. 'persona_wheel_chart_svg', ~0.5 MB) if you truly need one."
+            )
+        return ",".join(tokens)
 
 
 class WesternSynastryInput(BaseModel):
@@ -645,6 +803,23 @@ def _natal_payload(params: WesternNatalInput) -> dict:
         "lan": params.lan,
         "house_system": params.house_system,
     }
+
+
+def _persona_chart_payload(params: WesternPersonaChartInput) -> dict:
+    """Standard natal payload plus the persona-specific fields.
+
+    Optional fields are only added when set, so an omitted node_type or
+    graphic_layout leaves the API on its own defaults rather than sending an
+    empty string.
+    """
+    payload = _natal_payload(params)
+    payload["persona_planet"] = params.persona_planet
+    payload["output_include"] = params.output_include
+    if params.node_type:
+        payload["node_type"] = params.node_type
+    if params.graphic_layout:
+        payload["graphic_layout"] = params.graphic_layout
+    return payload
 
 
 def _synastry_payload(params: WesternSynastryInput) -> dict:
@@ -1513,6 +1688,36 @@ async def divine_western_dominants(
     if err:
         return err
     return await _call_divine_api("/western-api/v1/dominants", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
+
+
+@mcp.tool(name="divine_western_persona_chart", annotations=TOOL_ANNOTATIONS)
+async def divine_western_persona_chart(params: WesternPersonaChartInput, ctx: Context) -> str:
+    """Cast a Persona Chart for a chosen natal planet.
+
+    A persona chart is the full chart for the exact moment - within the first
+    year of life - when the transiting Sun reaches the natal degree of the
+    chosen persona_planet. The search starts one day after birth and scans up
+    to 366 days forward, so persona_datetime always falls in roughly the first
+    year of life.
+
+    Returns persona_planet, persona_datetime, planetary_positions, house_cusps,
+    aspect_table (persona-to-persona aspects) and persona_natal_aspect
+    (persona-planet-to-natal-planet aspects).
+
+    Defaults to data only (~21 KB). Chart images must be asked for explicitly
+    via output_include and are large (~0.5 MB per SVG); 'all' is refused.
+
+    Note: persona_planet='sun' is accepted but reduces to a one-year-later
+    Solar Return chart, since the Sun cannot have a persona relative to itself.
+    """
+    api_key, auth_token = _get_credentials(ctx)
+    return await _call_divine_api(
+        "/western-api/v1/persona-chart",
+        _persona_chart_payload(params),
+        API_HOST_8,
+        api_key=api_key,
+        auth_token=auth_token,
+    )
 
 
 # ══════════════════════════════════════════════
