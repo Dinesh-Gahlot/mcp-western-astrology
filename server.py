@@ -297,6 +297,52 @@ HOUSE_SYSTEM_FRIENDLY_NAMES = (
 
 VALID_DOMINANTS_METHODS = {"TRADITIONAL", "MODERN"}
 
+# ── Chart name visibility (DV-391 / DV-396) ──
+# hide_chart_name: "YES" hides the participant name(s) rendered at the bottom
+# left of the generated chart image. Default "NO" matches the API, so existing
+# output is unchanged unless a caller asks.
+#
+# Verified live 2026-09-21 across all eight endpoints Anubhav listed. Every one
+# ACCEPTS the parameter, but it only has an observable effect on four:
+#   composite/natal-wheel-chart   - removes the <tspan> name from the SVG
+#   synastry/natal-wheel-chart    - removes the <tspan> name from the SVG
+#   planet-return-details         - chart shrinks by ~1,077 bytes
+#   transit/wheel-chart           - chart shrinks by ~1,078 bytes
+# On the other four it is currently inert: persona-chart's SVG contains no
+# <text> elements at all, and prenatal-details, planetary-arc-directions and
+# secondary-progressions return no chart image to label. It is exposed on all
+# eight for parity with the API and so the tools keep working if those
+# endpoints gain charts later.
+VALID_HIDE_CHART_NAME = {"YES", "NO"}
+HIDE_CHART_NAME_HINT = (
+    "Hide the participant name(s) drawn at the bottom left of the chart image. "
+    "'YES' to hide, 'NO' (default) to show. Affects the rendered chart only - "
+    "never the numeric data. No effect on endpoints that return no chart image."
+)
+
+
+def _resolve_hide_chart_name(value: str | None) -> str:
+    """Normalise and validate hide_chart_name. Raises ValueError.
+
+    Non-string input (an unresolved pydantic FieldInfo when a tool function is
+    called directly rather than through the MCP layer) is treated as unset.
+    """
+    if not isinstance(value, str):
+        value = None
+    v = (value or "NO").strip().upper()
+    if v not in VALID_HIDE_CHART_NAME:
+        raise ValueError(f"Invalid hide_chart_name '{value}'. Must be 'YES' or 'NO'.")
+    return v
+
+
+def _apply_hide_chart_name(payload: dict, value: str | None) -> str | None:
+    """Attach hide_chart_name to a payload. Returns an error string or None."""
+    try:
+        payload["hide_chart_name"] = _resolve_hide_chart_name(value)
+    except ValueError as e:
+        return f"Error: {e}"
+    return None
+
 # ── Persona Chart (astroapi-8 /western-api/v1/persona-chart) ──
 VALID_PERSONA_PLANETS = {
     "sun", "moon", "mercury", "venus", "mars",
@@ -1106,7 +1152,11 @@ async def divine_western_synastry_house_cusps(params: WesternSynastryInput, ctx:
 
 
 @mcp.tool(name="divine_western_synastry_natal_wheel_chart", annotations=TOOL_ANNOTATIONS)
-async def divine_western_synastry_natal_wheel_chart(params: WesternSynastryInput, ctx: Context) -> str:
+async def divine_western_synastry_natal_wheel_chart(
+    params: WesternSynastryInput,
+    ctx: Context,
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
+) -> str:
     """Generate a bi-wheel synastry chart image for two persons.
 
     Returns an image URL showing both natal charts overlaid in a bi-wheel
@@ -1114,7 +1164,11 @@ async def divine_western_synastry_natal_wheel_chart(params: WesternSynastryInput
     the outer wheel for visual aspect analysis.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/western-api/v2/synastry/natal-wheel-chart", _synastry_payload(params), API_HOST_8, api_key=api_key, auth_token=auth_token)
+    payload = _synastry_payload(params)
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
+    return await _call_divine_api("/western-api/v2/synastry/natal-wheel-chart", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_western_synastry_aspect", annotations=TOOL_ANNOTATIONS)
@@ -1440,14 +1494,22 @@ async def divine_western_planet_combustion_transit(params: WesternTransitPlanetI
 
 
 @mcp.tool(name="divine_western_transit_wheel_chart", annotations=TOOL_ANNOTATIONS)
-async def divine_western_transit_wheel_chart(params: WesternFullTransitInput, ctx: Context) -> str:
+async def divine_western_transit_wheel_chart(
+    params: WesternFullTransitInput,
+    ctx: Context,
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
+) -> str:
     """Generate a transit wheel chart overlaying current transits on the natal chart.
 
     Returns a visual wheel chart showing natal planet positions in the inner
     ring and current transit positions in the outer ring.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/western-api/v1/transit/wheel-chart", _full_transit_payload(params), API_HOST_8, api_key=api_key, auth_token=auth_token)
+    payload = _full_transit_payload(params)
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
+    return await _call_divine_api("/western-api/v1/transit/wheel-chart", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_western_transit_planetary_positions", annotations=TOOL_ANNOTATIONS)
@@ -1518,7 +1580,11 @@ async def divine_western_composite_aspect_table(params: WesternSynastryInput, ct
 
 
 @mcp.tool(name="divine_western_composite_natal_wheel_chart", annotations=TOOL_ANNOTATIONS)
-async def divine_western_composite_natal_wheel_chart(params: WesternSynastryInput, ctx: Context) -> str:
+async def divine_western_composite_natal_wheel_chart(
+    params: WesternSynastryInput,
+    ctx: Context,
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
+) -> str:
     """Generate a visual composite chart wheel image for two persons.
 
     Returns an image URL of the composite (midpoint) chart wheel showing
@@ -1526,7 +1592,11 @@ async def divine_western_composite_natal_wheel_chart(params: WesternSynastryInpu
     in a traditional circular format.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/western-api/v1/composite/natal-wheel-chart", _synastry_payload(params), API_HOST_8, api_key=api_key, auth_token=auth_token)
+    payload = _synastry_payload(params)
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
+    return await _call_divine_api("/western-api/v1/composite/natal-wheel-chart", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
 # ══════════════════════════════════════════════
@@ -1691,7 +1761,11 @@ async def divine_western_dominants(
 
 
 @mcp.tool(name="divine_western_persona_chart", annotations=TOOL_ANNOTATIONS)
-async def divine_western_persona_chart(params: WesternPersonaChartInput, ctx: Context) -> str:
+async def divine_western_persona_chart(
+    params: WesternPersonaChartInput,
+    ctx: Context,
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
+) -> str:
     """Cast a Persona Chart for a chosen natal planet.
 
     A persona chart is the full chart for the exact moment - within the first
@@ -1711,9 +1785,13 @@ async def divine_western_persona_chart(params: WesternPersonaChartInput, ctx: Co
     Solar Return chart, since the Sun cannot have a persona relative to itself.
     """
     api_key, auth_token = _get_credentials(ctx)
+    payload = _persona_chart_payload(params)
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
     return await _call_divine_api(
         "/western-api/v1/persona-chart",
-        _persona_chart_payload(params),
+        payload,
         API_HOST_8,
         api_key=api_key,
         auth_token=auth_token,
@@ -1769,6 +1847,7 @@ async def divine_western_planet_return_details(
     return_lon: str = Field(..., description="Longitude of the return location (e.g., '72.8774')"),
     return_tzone: str = Field(..., description="Timezone offset of the return location (e.g., '5.5')"),
     return_place: str = Field(..., description="Return place name (e.g., 'Mumbai, Maharashtra, India')"),
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
 ) -> str:
     """Get detailed planetary return chart information.
 
@@ -1789,6 +1868,9 @@ async def divine_western_planet_return_details(
         "return_tzone": return_tzone,
         "return_place": return_place,
     })
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
     return await _call_divine_api("/western-api/v1/planet-return-details", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
@@ -1820,6 +1902,7 @@ async def divine_western_planetary_arc_directions(
     progressed_day: str = Field(..., description="Target date day for the direction (e.g., '13')"),
     progressed_month: str = Field(..., description="Target date month for the direction (e.g., '06')"),
     progressed_year: str = Field(..., description="Target date year for the direction (e.g., '2021')"),
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
 ) -> str:
     """Get planetary arc directions for the natal chart.
 
@@ -1836,6 +1919,9 @@ async def divine_western_planetary_arc_directions(
         "progressed_month": progressed_month,
         "progressed_year": progressed_year,
     })
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
     return await _call_divine_api("/western-api/v1/planetary-arc-directions", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
@@ -1851,6 +1937,7 @@ async def divine_western_secondary_progressions(
     progressed_sec: str = Field(..., description="Target time second (e.g., '20')"),
     progressed_type: str = Field(..., description="Progression rate method (e.g., 'ARMC1_NAIBOD')"),
     planet: str | None = Field(default=None, description="Optional planet to focus the progression on (e.g., 'Venus')"),
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
 ) -> str:
     """Get secondary progressions for the natal chart.
 
@@ -1873,6 +1960,9 @@ async def divine_western_secondary_progressions(
     })
     if planet is not None:
         payload["planet"] = planet
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
     return await _call_divine_api("/western-api/v1/secondary-progressions", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
@@ -1905,6 +1995,7 @@ async def divine_western_prenatal_details(
     params: WesternNatalInput,
     ctx: Context,
     prenatal_key: str = Field(..., description="Prenatal event identifier from divine_western_prenatal_list (e.g., 'SYZYGY_NM_P_648635040000')"),
+    hide_chart_name: str = Field(default="NO", description=HIDE_CHART_NAME_HINT),
 ) -> str:
     """Get detailed prenatal eclipse and lunation analysis for the natal chart.
 
@@ -1917,6 +2008,9 @@ async def divine_western_prenatal_details(
     api_key, auth_token = _get_credentials(ctx)
     payload = _natal_payload(params)
     payload["prenatal_key"] = prenatal_key
+    err = _apply_hide_chart_name(payload, hide_chart_name)
+    if err:
+        return err
     return await _call_divine_api("/western-api/v1/prenatal-details", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
