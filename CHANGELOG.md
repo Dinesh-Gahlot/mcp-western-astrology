@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.7.0] - 2026-09-21
+
+### Added
+
+**`hide_chart_name` on all eight chart endpoints (DV-396).** Hides the participant name(s) drawn at the bottom left of a generated chart image. `"YES"` to hide, `"NO"` (default) to show — matching the API, so existing output is unchanged unless a caller opts in.
+
+Added to `divine_western_composite_natal_wheel_chart`, `divine_western_synastry_natal_wheel_chart`, `divine_western_planet_return_details`, `divine_western_persona_chart`, `divine_western_prenatal_details`, `divine_western_planetary_arc_directions`, `divine_western_secondary_progressions` and `divine_western_transit_wheel_chart`. Tool count unchanged at 58.
+
+Exposed as a per-tool argument rather than a field on `WesternSynastryInput` / `WesternNatalInput` / `WesternFullTransitInput`, because those models are shared with ~30 other tools that have no chart to label.
+
+**Only four of the eight currently do anything.** Verified live 2026-09-21 — every endpoint accepts the parameter, but it has an observable effect on:
+
+| Endpoint | Effect |
+| --- | --- |
+| `composite/natal-wheel-chart` | name `<tspan>` removed from the SVG |
+| `synastry/natal-wheel-chart` | name `<tspan>` removed from the SVG |
+| `planet-return-details` | chart shrinks ~1,077 bytes |
+| `transit/wheel-chart` | chart shrinks ~1,078 bytes |
+
+On the other four it is inert: `persona-chart`'s SVG contains no `<text>` elements at all, and `prenatal-details`, `planetary-arc-directions` and `secondary-progressions` return no chart image. Exposed anyway for parity with the API and so the tools keep working if those endpoints gain charts later; the field description says it affects rendered charts only.
+
 ## [1.6.0] - 2026-09-14
 
 ### Added
