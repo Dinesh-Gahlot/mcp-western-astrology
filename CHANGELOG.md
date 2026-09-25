@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.0] - 2026-09-25
+
+### Changed
+
+**`divine_western_planetary_positions` now calls astroapi-8 instead of astroapi-4 (DV-433 / DV-445).** The astroapi-4 version is the older implementation and omits **Vertex**, while `aspect-patterns` (on astroapi-8) lists Vertex as a pattern participant. A client reported exactly that cross-endpoint mismatch: a sign stellium containing Vertex from aspect-patterns, with no Vertex in planetary-positions to check it against.
+
+Verified 2026-09-25 with the client's own chart (10 Jan 2002, 21:08, Sainte-Agathe-des-Monts):
+
+- all 17 bodies both hosts return have **identical** values, fields and types;
+- astroapi-8 adds **Vertex** (18 bodies), placed after MC and before Chiron — here 321.488° Aquarius, which agrees with the Aquarius stellium aspect-patterns reported for the same chart;
+- `house_system` letter codes and `lan` behave identically on both hosts.
+
+The response envelope changes from `{"success": 1, ...}` to `{"status": "success", "code": 200, ...}`. `_call_divine_api` already handles both, since other tools on astroapi-8 use the newer shape, so the tool's behaviour is unaffected apart from the extra body.
+
+aspect-patterns never returns Vertex's degree, so this tool is now the way to get it. Whether aspect-patterns uses *exactly* this longitude internally can't be confirmed from outside — only the sign agreement is verified. The tool description says only what is verified.
+
 ## [1.7.0] - 2026-09-21
 
 ### Added
