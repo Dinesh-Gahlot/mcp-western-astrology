@@ -934,13 +934,22 @@ def _full_transit_payload(params) -> dict:
 async def divine_western_planetary_positions(params: WesternNatalInput, ctx: Context) -> str:
     """Get planetary positions in the Western natal chart.
 
-    Returns positions of Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn,
-    Uranus, Neptune, Pluto with sign, degree, and house placement.
+    Returns 18 bodies with sign, degree, house, element and modality: the
+    Ascendant, Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus,
+    Neptune, Pluto, North and South Node, MC, Vertex, Chiron, Part of Fortune
+    and Lilith. Use this for Vertex's degree: divine_western_aspect_patterns
+    can list Vertex as a pattern participant but does not return its degree.
     For a complete natal reading, also call divine_western_house_cusps,
     divine_western_aspect_table, and divine_western_natal_insights in parallel.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/western-api/v1/planetary-positions", _natal_payload(params), API_HOST_4, api_key=api_key, auth_token=auth_token)
+    # astroapi-8, not astroapi-4 (DV-433 / DV-445). The astroapi-4 version is
+    # the older implementation and omits Vertex, which aspect-patterns (also
+    # on astroapi-8) does use - the cross-endpoint mismatch a client reported.
+    # Verified 2026-09-25: all 17 bodies both hosts share return identical
+    # values, fields and types; -8 adds Vertex and uses the newer
+    # {"status": "success", ...} envelope, which _call_divine_api handles.
+    return await _call_divine_api("/western-api/v1/planetary-positions", _natal_payload(params), API_HOST_8, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_western_house_cusps", annotations=TOOL_ANNOTATIONS)
