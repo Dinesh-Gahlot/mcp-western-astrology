@@ -1,6 +1,6 @@
 # Divine API - Western Astrology MCP Server
 
-Official MCP server by Divine API for Western Astrology services. Exposes 57 tools covering natal charts, synastry, transits, composite charts, progressions, planetary returns, prenatal analysis, and advanced natal techniques, backed by the live Divine API (astroapi-4 and astroapi-8 hosts).
+Official MCP server by Divine API for Western Astrology services. Exposes 59 tools covering natal charts, synastry, transits, composite charts, progressions, planetary returns, prenatal analysis, and advanced natal techniques, backed by the live Divine API (astroapi-4 and astroapi-8 hosts, plus the Location API for place search).
 
 ## Setup
 
@@ -8,7 +8,7 @@ Official MCP server by Divine API for Western Astrology services. Exposes 57 too
 2. Set environment variables: `DIVINE_API_KEY` and `DIVINE_AUTH_TOKEN`
 3. Add to your MCP client configuration (Claude Desktop, Cursor, etc.)
 
-## Tool groups (57 tools)
+## Tool groups (59 tools)
 
 | Group | Tools | Host |
 |-------|-------|------|
@@ -16,9 +16,10 @@ Official MCP server by Divine API for Western Astrology services. Exposes 57 too
 | Synastry | 13 | astroapi-4 (wheel/aspect-table on astroapi-8) |
 | Transit | 12 | astroapi-4 and astroapi-8 |
 | Composite | 4 | astroapi-8 |
-| Advanced natal | 11 | astroapi-8 |
+| Advanced natal | 12 | astroapi-8 |
 | Progressions and returns | 5 | astroapi-8 |
 | Prenatal | 2 | astroapi-8 |
+| Location (place search) | 1 | geolocation |
 
 ## Notable input details
 

@@ -181,7 +181,7 @@ if _TRANSPORT == "http":
 
 _SERVER_INSTRUCTIONS = """DivineAPI Western astrology: Natal, Synastry, Transit, Composite, Progressions, planetary returns, and fixed stars.
 
-Input conventions: dates as separate day, month, year fields (plus hour, min, sec); place is a plain city string; lat and lon are decimals; tzone is a decimal UTC offset. house_system accepts friendly names (placidus, koch, whole-sign, campanus, regiomontanus, porphyry, equal, morinus, alcabitius) or single-letter codes; it defaults to placidus.
+Input conventions: dates as separate day, month, year fields (plus hour, min, sec); place is a plain city string; lat and lon are decimals; tzone is a decimal UTC offset; if you only have a place name, call divine_western_search_location to get its lat, lon and timezone. house_system accepts friendly names (placidus, koch, whole-sign, campanus, regiomontanus, porphyry, equal, morinus, alcabitius) or single-letter codes; it defaults to placidus.
 
 Chaining: the list/details tools work in pairs. Call divine_western_fixed_stars_list, divine_western_planet_returns_list, or divine_western_prenatal_list first, then pass a key from the result to the matching _details tool.
 
@@ -202,6 +202,7 @@ mcp = FastMCP(
 
 API_HOST_4 = "https://astroapi-4.divineapi.com"
 API_HOST_8 = "https://astroapi-8.divineapi.com"
+GEOLOCATION_HOST = "https://geolocation.divineapi.com"  # Location API (place search)
 
 DIVINE_API_KEY = os.environ.get("DIVINE_API_KEY", "")
 DIVINE_AUTH_TOKEN = os.environ.get("DIVINE_AUTH_TOKEN", "")
@@ -749,8 +750,12 @@ async def _call_divine_api(
     base_url: str = API_HOST_4,
     api_key: str | None = None,
     auth_token: str | None = None,
+    on_http_error=None,
 ) -> str:
     """Make a POST request to Divine API and return formatted JSON response.
+
+    on_http_error, when given, turns a non-2xx response into the error text
+    instead of the default _handle_http_error.
 
     Raises ToolError on any failure (non-2xx, network error, or an upstream
     error envelope returned with HTTP 200) so MCP clients see isError: true
@@ -772,7 +777,7 @@ async def _call_divine_api(
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as e:
-        raise ToolError(_handle_http_error(e)) from e
+        raise ToolError((on_http_error or _handle_http_error)(e)) from e
     except httpx.TimeoutException as e:
         raise ToolError("Request timed out. The Divine API server may be slow. Please try again.") from e
     except httpx.ConnectError as e:
@@ -825,6 +830,33 @@ def _handle_http_error(e: httpx.HTTPStatusError) -> str:
         except Exception:
             pass
         return f"Error: API returned status {status}. Response: {body}"
+
+
+def _location_http_error(e: httpx.HTTPStatusError) -> str:
+    """Error text for the Location API, which sends its own message and per-field details.
+
+    Its 403 means the plan lacks the Location API, not the astrology APIs, so the
+    generic _handle_http_error wording would mislead.
+    """
+    status = e.response.status_code
+    try:
+        body = e.response.json()
+    except Exception:
+        return _handle_http_error(e)
+    if not isinstance(body, dict):
+        return _handle_http_error(e)
+    message = body.get("message") or "Location API error."
+    details = (body.get("error") or {}).get("details")
+    if isinstance(details, dict):
+        detail_text = "; ".join(f"{k}: {v}" for k, v in details.items())
+    elif isinstance(details, list):
+        detail_text = "; ".join(str(d) for d in details)
+    else:
+        detail_text = ""
+    hint = ""
+    if status == 403:
+        hint = " Your DivineAPI plan does not include the Location API; check your subscription at https://divineapi.com/pricing"
+    return f"Error: Location API returned {status}: {message}" + (f" ({detail_text})" if detail_text else "") + hint
 
 
 # ──────────────────────────────────────────────
@@ -1310,7 +1342,7 @@ async def divine_western_synastry_financial_compat(params: WesternSynastryInput,
 
 
 # ══════════════════════════════════════════════
-# TRANSIT TOOLS (11) - astroapi-4 & astroapi-8
+# TRANSIT TOOLS (12) - astroapi-4 & astroapi-8
 # ══════════════════════════════════════════════
 
 
@@ -1609,7 +1641,7 @@ async def divine_western_composite_natal_wheel_chart(
 
 
 # ══════════════════════════════════════════════
-# ADVANCED NATAL TOOLS (11) -astroapi-8.divineapi.com
+# ADVANCED NATAL TOOLS (12) -astroapi-8.divineapi.com
 # ══════════════════════════════════════════════
 
 
@@ -2021,6 +2053,44 @@ async def divine_western_prenatal_details(
     if err:
         return err
     return await _call_divine_api("/western-api/v1/prenatal-details", payload, API_HOST_8, api_key=api_key, auth_token=auth_token)
+
+
+# ══════════════════════════════════════════════
+# LOCATION — geolocation.divineapi.com
+# ══════════════════════════════════════════════
+
+
+@mcp.tool(name="divine_western_search_location", annotations=TOOL_ANNOTATIONS)
+async def divine_western_search_location(
+    place: str = Field(..., description="Place name to search for, at least 3 characters (e.g. 'Patna', 'New York')", min_length=3, max_length=200),
+    ctx: Context = None,
+) -> str:
+    """Search for a place by name and get its coordinates and timezone, for the place, lat, lon and tzone inputs of the other tools.
+
+    Returns up to 10 matches, largest population first, each with place_id,
+    name, full_name (e.g. 'Patna, Bihar, India'), country, admin1 (state or
+    region), latitude, longitude, timezone (IANA name, e.g. Asia/Kolkata),
+    timezone_value (UTC offset in hours) and population. Matching is by
+    name prefix. When several places match, confirm with the user which one
+    is meant.
+
+    timezone_value is the zone's offset today. For a birth date in a zone
+    with summer time (most of the Americas and Europe) or with historical
+    changes, the offset on that date can differ (New York is -5 in winter
+    and -4 in summer), so work out the offset for the birth date from the
+    IANA timezone before passing it as tzone.
+
+    Place data (c) GeoNames (geonames.org), CC BY 4.0: keep the attribution
+    when showing results.
+    """
+    query = place.strip()
+    if len(query) < 3:
+        raise ToolError("Error: place must be at least 3 characters, not counting leading or trailing spaces.")
+    api_key, auth_token = _get_credentials(ctx)
+    return await _call_divine_api(
+        "/location", {"place": query}, base_url=GEOLOCATION_HOST,
+        api_key=api_key, auth_token=auth_token, on_http_error=_location_http_error,
+    )
 
 
 # ──────────────────────────────────────────────
