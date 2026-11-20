@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.10.0] - 2026-11-20
+
+### Added
+
+**Two new Location API tools (DV-743, the last gaps from the DV-681 review).** Docs: developers.divineapi.com/geo-location-api/timezone-api and /geo-location-health; Postman and docs tickets DV-724 and DV-723.
+
+- **`divine_western_get_timezone`** wraps `POST https://geolocation.divineapi.com/timezone`. It returns the UTC offset that applied at a place on a given local date and time, with summer time and historical changes: `timezone_value` (decimal hours, the value for `tzone`), `utc_offset`, `local_datetime`, `utc_datetime`, `is_dst` and `ambiguous`, plus the matched `place`. The place is a `place_id` from `divine_western_search_location` (the documented input), or `lat` and `lon` (nearest known place), or an IANA `timezone` name; the service accepts all three (`src/routes/datetime.route.js`). The tool rejects zero or several of them locally, because the API silently prefers `place_id` when more than one is sent. Leave `day`/`month`/`year`/`hour`/`min` out for the current time; `sec` defaults to 0.
+- **`divine_western_geolocation_health`** wraps `GET https://geolocation.divineapi.com/health`. It needs no credentials and costs no credits.
+
+`divine_western_search_location` and the server instructions now point to `divine_western_get_timezone` for a birth-date `tzone`, instead of telling the model to work out the offset from the IANA name itself: the search's `timezone_value` is today's offset.
+
+Verified live 2026-11-20: Kolkata 1990-07-15 14:30 is +5.5; New York at the same moment is -4 with `is_dst` true; Delhi on 1943-01-01 is +6.5 (wartime time); 2026-03-08 02:30 New York (clocks forward) is a 422 with the reason; 2026-11-01 01:30 New York (clocks back) returns `ambiguous` true. Tool count: 59 -> 61.
+
 ## [1.9.0] - 2026-11-09
 
 ### Added
