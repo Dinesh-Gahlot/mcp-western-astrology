@@ -181,7 +181,7 @@ if _TRANSPORT == "http":
 
 _SERVER_INSTRUCTIONS = """DivineAPI Western astrology: Natal, Synastry, Transit, Composite, Progressions, planetary returns, and fixed stars.
 
-Input conventions: dates as separate day, month, year fields (plus hour, min, sec); place is a plain city string; lat and lon are decimals; tzone is a decimal UTC offset; if you only have a place name, call divine_western_search_location to get its lat, lon and timezone. house_system accepts friendly names (placidus, koch, whole-sign, campanus, regiomontanus, porphyry, equal, morinus, alcabitius) or single-letter codes; it defaults to placidus.
+Input conventions: dates as separate day, month, year fields (plus hour, min, sec); place is a plain city string; lat and lon are decimals; tzone is a decimal UTC offset; if you only have a place name, call divine_western_search_location to get its lat, lon and place_id, then divine_western_get_timezone with that place_id and the birth or event date and time for the tzone that applied then (the search's timezone_value is today's offset, which can be an hour off for dates in summer time). house_system accepts friendly names (placidus, koch, whole-sign, campanus, regiomontanus, porphyry, equal, morinus, alcabitius) or single-letter codes; it defaults to placidus.
 
 Chaining: the list/details tools work in pairs. Call divine_western_fixed_stars_list, divine_western_planet_returns_list, or divine_western_prenatal_list first, then pass a key from the result to the matching _details tool.
 
@@ -202,7 +202,7 @@ mcp = FastMCP(
 
 API_HOST_4 = "https://astroapi-4.divineapi.com"
 API_HOST_8 = "https://astroapi-8.divineapi.com"
-GEOLOCATION_HOST = "https://geolocation.divineapi.com"  # Location API (place search)
+GEOLOCATION_HOST = "https://geolocation.divineapi.com"  # Location API (place search, timezone, health)
 
 DIVINE_API_KEY = os.environ.get("DIVINE_API_KEY", "")
 DIVINE_AUTH_TOKEN = os.environ.get("DIVINE_AUTH_TOKEN", "")
@@ -2077,8 +2077,9 @@ async def divine_western_search_location(
     timezone_value is the zone's offset today. For a birth date in a zone
     with summer time (most of the Americas and Europe) or with historical
     changes, the offset on that date can differ (New York is -5 in winter
-    and -4 in summer), so work out the offset for the birth date from the
-    IANA timezone before passing it as tzone.
+    and -4 in summer), so for a birth or event date call divine_western_get_timezone
+    with the place_id and that date and time, and pass its timezone_value
+    as tzone.
 
     Place data (c) GeoNames (geonames.org), CC BY 4.0: keep the attribution
     when showing results.
@@ -2091,6 +2092,89 @@ async def divine_western_search_location(
         "/location", {"place": query}, base_url=GEOLOCATION_HOST,
         api_key=api_key, auth_token=auth_token, on_http_error=_location_http_error,
     )
+
+
+@mcp.tool(name="divine_western_get_timezone", annotations=TOOL_ANNOTATIONS)
+async def divine_western_get_timezone(
+    place_id: int | None = Field(default=None, description="place_id of a place from divine_western_search_location (e.g. 1275004 for Kolkata). Give this, or lat and lon, or timezone", ge=1),
+    lat: float | None = Field(default=None, description="Latitude, with lon, instead of place_id: the nearest known place is used (e.g. 28.6139)", ge=-90, le=90),
+    lon: float | None = Field(default=None, description="Longitude, with lat (e.g. 77.2090)", ge=-180, le=180),
+    timezone: str | None = Field(default=None, description="IANA timezone name instead of a place (e.g. 'America/New_York')", max_length=64),
+    day: int | None = Field(default=None, description="Local day of the month (1-31). Give day, month, year, hour and min together, or none of them for the current time", ge=1, le=31),
+    month: int | None = Field(default=None, description="Local month (1-12)", ge=1, le=12),
+    year: int | None = Field(default=None, description="Local year (1800-2200)", ge=1800, le=2200),
+    hour: int | None = Field(default=None, description="Local hour, 24-hour clock (0-23)", ge=0, le=23),
+    min: int | None = Field(default=None, description="Local minute (0-59)", ge=0, le=59),
+    sec: int | None = Field(default=None, description="Local second (0-59, default 0)", ge=0, le=59),
+    ctx: Context = None,
+) -> str:
+    """Get the UTC offset that applied at a place on a given local date and time, with summer time (DST) and historical changes, for the tzone input of the other tools.
+
+    Pass the place_id from divine_western_search_location (or lat and lon, or an
+    IANA timezone name) and the local date and time of the birth or event.
+    Leave the date and time out for the current time.
+
+    Returns place (the matched place, or null for a timezone name),
+    timezone (IANA name), local_datetime, utc_datetime, timezone_value
+    (decimal hours, e.g. 5.5 or -4: pass it as tzone), utc_offset (e.g.
+    '+05:30'), is_dst and ambiguous. ambiguous is true when that local time
+    happened twice because the clocks went back; the API then uses the
+    first of the two (still summer time), so say so. A local time skipped
+    when the clocks went forward is rejected: ask for a time after the
+    change. Examples: New York on 1990-07-15 14:30 was -4 (summer time);
+    Delhi on 1943-01-01 was +6.5 (wartime time).
+
+    Place data (c) GeoNames (geonames.org), CC BY 4.0: keep the attribution
+    when showing results.
+    """
+    tz_name = timezone.strip() if isinstance(timezone, str) else None
+    given = [name for name, present in (
+        ("place_id", place_id is not None),
+        ("lat/lon", lat is not None or lon is not None),
+        ("timezone", bool(tz_name)),
+    ) if present]
+    if not given:
+        raise ToolError("Error: give place_id (from divine_western_search_location), or lat and lon, or an IANA timezone name.")
+    if len(given) > 1:
+        raise ToolError(f"Error: give only one of place_id, lat and lon, or timezone (got {' and '.join(given)}).")
+    if (lat is None) != (lon is None):
+        raise ToolError("Error: lat and lon go together; give both.")
+    payload = {
+        "place_id": place_id, "lat": lat, "lon": lon, "timezone": tz_name,
+        "day": day, "month": month, "year": year, "hour": hour, "min": min, "sec": sec,
+    }
+    api_key, auth_token = _get_credentials(ctx)
+    return await _call_divine_api(
+        "/timezone", payload, base_url=GEOLOCATION_HOST,
+        api_key=api_key, auth_token=auth_token, on_http_error=_location_http_error,
+    )
+
+
+@mcp.tool(name="divine_western_geolocation_health", annotations=TOOL_ANNOTATIONS)
+async def divine_western_geolocation_health() -> str:
+    """Check whether the Location API service (geolocation.divineapi.com, behind divine_western_search_location and divine_western_get_timezone) is up.
+
+    Needs no credentials and uses no credits. Returns status 'success' with
+    data {"service": "location-api", "status": "ok"} when healthy. Use it to
+    tell a Location API outage apart from an input or plan problem.
+    """
+    url = f"{GEOLOCATION_HOST}/health"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers={"Accept": "application/json"}, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPStatusError as e:
+        raise ToolError(f"Error: the Location API health check returned HTTP {e.response.status_code}: the service is down or degraded.") from e
+    except httpx.TimeoutException as e:
+        raise ToolError("Error: the Location API health check timed out after 10 seconds.") from e
+    except httpx.ConnectError as e:
+        raise ToolError("Error: could not connect to geolocation.divineapi.com.") from e
+    except Exception as e:
+        raise ToolError(f"Unexpected error - {type(e).__name__}: {str(e)}") from e
+    if not isinstance(data, dict) or data.get("status") != "success":
+        raise ToolError(f"Error: the Location API reported a problem: {json.dumps(data, ensure_ascii=False)[:300]}")
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
 
 # ──────────────────────────────────────────────
